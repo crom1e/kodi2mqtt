@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="service.mqtt" name="MQTT Adapter" version="0.13" provider-name="owagner">
+<addon id="service.mqtt" name="MQTT Adapter" version="0.16" provider-name="tommy">
   <requires>
-    <import addon="xbmc.python" version="2.19.0"/>
+    <import addon="xbmc.python" version="3.0.0"/>
   </requires>
   <extension point="xbmc.service" library="service.py" start="login" />
   <extension point="xbmc.addon.metadata">
     <summary lang="en">MQTT Adapter, adhering to mqtt-smarthome specification</summary>
-    <description lang="en">The addon is an adapter to an MQTT broker. It will publish information about what is playing, and provides remote control capability. It adheres to the mqtt-smarthome specification. </description>
+    <description lang="en">The addon is an adapter to an MQTT broker. It will publish information about what is playing, and provides remote control capability. It adheres to the mqtt-smarthome specification. Fork of owangers excellent version, pounded to fit kodi > 19</description>
     <disclaimer lang="en"></disclaimer>
     <platform>all</platform>
     <license>MIT</license>

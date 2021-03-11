@@ -15,9 +15,10 @@ def getSetting(setting):
     return __addon__.getSetting(setting).strip()
 
 def load_settings():
-    global mqttprogress,mqttinterval,mqttdetails,mqttignore
+    global mqttprogress, mqttinterval, mqttmillis, mqttdetails, mqttignore
     mqttprogress = getSetting('mqttprogress').lower() == "true"
     mqttinterval = int(getSetting('mqttinterval'))
+    mqttmillis = getSetting('mqttmillis').lower() == "true"
     mqttdetails = getSetting('mqttdetails').lower() == "true"
     mqttignore = getSetting('mqttignore')
     if mqttignore:
@@ -46,6 +47,11 @@ def sendrpc(method,params):
     mqttlogging("MQTT: JSON-RPC call "+method+" returned "+res)
     return json.loads(res)
 
+def setvol(data):
+    params=json.loads('{"volume":' + str(data) + '}')
+    sendrpc("Application.SetVolume",params)
+    #res=xbmc.executebuiltin("XBMC.SetVolume("+data+")")
+    xbmc.log(data)
 #
 # Publishes a MQTT message. The topic is built from the configured
 # topic prefix and the suffix. The message itself is JSON encoded,
@@ -83,7 +89,11 @@ def setplaystate(state,detail):
         publish("playbackstate",state,{"kodi_state":detail,"kodi_playerid":activeplayerid,"kodi_playertype":activeplayertype,"kodi_timestamp":int(time.time())})
 
 def convtime(ts):
-    return("%02d:%02d:%02d" % (ts/3600,(ts/60)%60,ts%60))
+    global mqttmillis
+    if mqttmillis:
+        return "%02d:%02d:%02d.%03d" % (ts/3600, (ts/60) % 60, ts % 60, ts % 1 * 1000)
+    else:
+        return "%02d:%02d:%02d" % (ts/3600, (ts/60) % 60, ts % 60)
 
 #
 # Publishes playback progress
@@ -113,7 +123,7 @@ def publishdetails():
     if not player.isPlaying():
         return
     if ignorelist(mqttignore,"filepath"):
-        res=sendrpc("Player.GetItem",{"playerid":activeplayerid,"properties":["title","streamdetails","file","thumbnail","fanart"]})
+        res=sendrpc("Player.GetItem",{"playerid":activeplayerid,"properties":["title","streamdetails","file","thumbnail","fanart", "art"]})
         if "result" in res:
             newtitle=res["result"]["item"]["title"]
             newdetail={"kodi_details":res["result"]["item"]}
@@ -137,6 +147,9 @@ class MQTTMonitor(xbmc.Monitor):
         startmqtt()
 
 class MQTTPlayer(xbmc.Player):
+
+    def onAVStarted(self):
+        setplaystate(1, "started")
 
     def onPlayBackStarted(self):
         setplaystate(1,"started")
@@ -186,6 +199,14 @@ def processplay(data):
     except ValueError:
         player.play(data)
 
+def processvolume(data):
+    try:
+        vol = int(data)
+        setvol(vol)
+    except ValueError:
+        params=json.loads(data)
+        sendrpc("Application.SetVolume",params)
+
 def processplaybackstate(data):
     global playbackstate
     if data=="0" or data=="stop":
@@ -205,6 +226,25 @@ def processplaybackstate(data):
         player.playnext()
     elif data=="previous":
         player.playprevious()
+    elif data=="playcurrent":
+        path = xbmc.getInfoLabel('ListItem.FileNameAndPath')
+        sendrpc("Player.Open", {"item": {"file": path}})
+
+def processprogress(data):
+    parts = data.partition('.')
+    data = parts[0]
+    millis = int(parts[2]) if parts[2] != '' else 0
+    hours, minutes, seconds = [int(i) for i in data.split(":")]
+    time = hours * 3600 + minutes * 60 + seconds + millis / 1000.0
+    player.seekTime(time)
+
+def processsendcomand(data):
+	try:
+		cmd=json.loads(data)
+		res=xbmc.executeJSONRPC(json.dumps(cmd))
+		mqttlogging("MQTT: JSON-RPC call "+cmd['method']+" returned "+res)
+	except ValueError:
+		mqttlogging("MQTT: JSON-RPC call ValueError")
 
 def processcommand(topic,data):
     if topic=="notify":
@@ -213,6 +253,12 @@ def processcommand(topic,data):
         processplay(data)
     elif topic=="playbackstate":
         processplaybackstate(data)
+    elif topic=="progress":
+        processprogress(data)
+    elif topic=="api":
+	    processsendcomand(data)
+    elif topic=="volume":
+        processvolume(data)
     else:
         mqttlogging("MQTT: Unknown command "+topic)
 
@@ -232,6 +278,7 @@ def msghandler(mqc,userdata,msg):
 
 def connecthandler(mqc,userdata,rc):
     mqttlogging("MQTT: Connected to MQTT broker with rc=%d" % (rc))
+    mqc.publish(topic+"connected",2,qos=1,retain=True)
     mqc.subscribe(topic+"command/#",qos=0)
 
 def disconnecthandler(mqc,userdata,rc):
@@ -276,7 +323,6 @@ def startmqtt():
     else:
         mqttlogging("MQTT: No connection possible, giving up")
         return(False)
-    mqc.publish(topic+"connected",2,qos=1,retain=True)
     mqc.loop_start()
     return(True)
 
